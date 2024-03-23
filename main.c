@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <math.h>
 
@@ -15,7 +16,8 @@
 
 typedef long double ld;
 
-const ld derivative_delta = 0.001;
+const int thread_num = 12;
+const ld derivative_delta = 0.0001;
 
 char *out_dir;
 
@@ -230,12 +232,12 @@ ld min(ld x, ld y) {
   return (x < y) ? x : y;
 }
 
-ld Vlj(int from, int to) {
-  ld dx = particles[from].x - particles[to].x;
+ld Vlj(int from, int to, ld tox, ld toy, ld toz) {
+  ld dx = particles[from].x - tox;
   dx = min(dx, a - dx);
-  ld dy = particles[from].y - particles[to].y;
+  ld dy = particles[from].y - toy;
   dy = min(dy, b - dy);
-  ld dz = particles[from].z - particles[to].z;
+  ld dz = particles[from].z - toz;
   dz = min(dz, c - dz);
   ld dist2 = dx * dx + dy * dy + dz * dz;
   if (dist2 > cutoff * cutoff) {
@@ -247,32 +249,20 @@ ld Vlj(int from, int to) {
 }
 
 ld get_derivative_x(int from, int to) {
-  particles[to].x += derivative_delta;
-  ld lhs = Vlj(from, to);
-  particles[to].x -= 2 * derivative_delta;
-  ld rhs = Vlj(from, to);
-  particles[to].x += derivative_delta;
-
+  ld lhs = Vlj(from, to, particles[to].x + derivative_delta, particles[to].y, particles[to].z);
+  ld rhs = Vlj(from, to, particles[to].x - derivative_delta, particles[to].y, particles[to].z);
   return (lhs - rhs) / (2 * derivative_delta);
 }
 
 ld get_derivative_y(int from, int to) {
-  particles[to].y += derivative_delta;
-  ld lhs = Vlj(from, to);
-  particles[to].y -= 2 * derivative_delta;
-  ld rhs = Vlj(from, to);
-  particles[to].y += derivative_delta;
-
+  ld lhs = Vlj(from, to, particles[to].x, particles[to].y + derivative_delta, particles[to].z);
+  ld rhs = Vlj(from, to, particles[to].x, particles[to].y - derivative_delta, particles[to].z);
   return (lhs - rhs) / (2 * derivative_delta);
 }
 
 ld get_derivative_z(int from, int to) {
-  particles[to].z += derivative_delta;
-  ld lhs = Vlj(from, to);
-  particles[to].z -= 2 * derivative_delta;
-  ld rhs = Vlj(from, to);
-  particles[to].z += derivative_delta;
-
+  ld lhs = Vlj(from, to, particles[to].x, particles[to].y, particles[to].z + derivative_delta);
+  ld rhs = Vlj(from, to, particles[to].x, particles[to].y, particles[to].z - derivative_delta);
   return (lhs - rhs) / (2 * derivative_delta);
 }
 
@@ -284,16 +274,16 @@ Vector affect(int from, int to) {
   return result;
 }
 
-Vector *get_force() {
-  Vector *force = (Vector *) malloc(sizeof(Vector) * particles_size);
-  for (int i = 0; i < particles_size; ++i) {
-    force[i].x = 0;
-    force[i].y = 0;
-    force[i].z = 0;
-  }
-  // do not calculate twice
-  // make parallel
-  for (int i = 0; i < particles_size; ++i) {
+typedef struct args {
+  Vector *force;
+  int index;
+} args;
+
+void *get_single_force(void *arg) {
+  args *arg_t = (args *)arg;
+  Vector *force = arg_t->force;
+  int index = arg_t->index;
+  for (int i = index; i < particles_size; i += thread_num) {
     for (int j = 0; j < particles_size; ++j) {
       if (i != j) {
         Vector new_force = affect(j, i);
@@ -303,6 +293,45 @@ Vector *get_force() {
       }
     }
   }
+  return NULL;
+}
+
+Vector *get_force() {
+  Vector *force = (Vector *) malloc(sizeof(Vector) * particles_size);
+  for (int i = 0; i < particles_size; ++i) {
+    force[i].x = 0;
+    force[i].y = 0;
+    force[i].z = 0;
+  }
+  pthread_t* threads = (pthread_t *)malloc(sizeof(pthread_t) * thread_num);
+  args *thread_args = (args *)malloc(sizeof(args) * thread_num);
+  for(int i = 0; i < thread_num; ++i)
+  {
+    thread_args[i].force = force;
+    thread_args[i].index = i;
+    int thread_out = pthread_create(&threads[i], NULL, get_single_force, &thread_args[i]);
+    // check for errors
+    if(thread_out != 0)
+    {
+      printf("Error while creating thread!\n");
+      exit(thread_out);
+    }
+  }
+  for(int i = 0; i < thread_num; ++i)
+  {
+    void *thread_result;
+    // join thread
+    int thread_out = pthread_join(threads[i], &thread_result);
+
+    // check for errors
+    if(thread_out != 0)
+    {
+      printf("Error while joining thread!\n");
+      exit(thread_out);
+    }
+  }
+  free(thread_args);
+  free(threads);
   return force;
 }
 
