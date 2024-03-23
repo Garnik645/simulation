@@ -347,27 +347,18 @@ void move(Vector *force) {
     particles[i].vz += acceleration.z * delta_time;
 
     particles[i].x += particles[i].vx * delta_time + acceleration.x * delta_time * delta_time / 2;
-    while (particles[i].x < 0) {
-      particles[i].x += a;
-    }
-    while (particles[i].x > a) {
-      particles[i].x -= a;
+    if (particles[i].x < 0 || particles[i].x > a) {
+      particles[i].x = fmod(particles[i].x, a);
     }
 
     particles[i].y += particles[i].vy * delta_time + acceleration.y * delta_time * delta_time / 2;
-    while (particles[i].y < 0) {
-      particles[i].y += b;
-    }
-    while (particles[i].y > b) {
-      particles[i].y -= b;
+    if (particles[i].y < 0 || particles[i].y > b) {
+      particles[i].y = fmod(particles[i].y, b);
     }
 
     particles[i].z += particles[i].vz * delta_time + acceleration.z * delta_time * delta_time / 2;
-    while (particles[i].z < 0) {
-      particles[i].z += c;
-    }
-    while (particles[i].z > c) {
-      particles[i].z -= c;
+    if (particles[i].z < 0 || particles[i].z > c) {
+      particles[i].z = fmod(particles[i].z, c);
     }
   }
 }
